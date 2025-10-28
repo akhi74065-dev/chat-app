@@ -8,61 +8,71 @@
         document.addEventListener('DOMContentLoaded', (event) => {
             var socket = io();
 
-            // Find the messages list
             var messagesList = document.getElementById('messages');
+            var messageInput = document.getElementById('messageInput');
+            var sendButton = document.getElementById('sendButton');
 
-            // --- Scroll to bottom ---
+            // --- New: Ask for username ---
+            let username = '';
+            while (username.trim() === '') {
+                username = prompt("What is your name?");
+            }
+            // Send the username to the server
+            socket.emit('join', username);
+            // --- End of new part ---
+
             function scrollToBottom() {
                 messagesList.scrollTop = messagesList.scrollHeight;
             }
             
-            // Scroll to bottom on initial load
             scrollToBottom();
 
-            // --- Event Listeners ---
-            socket.on('connect', function() {
-                console.log('Connected to server!');
-            });
-
-            // 2. Handle incoming messages from the server
-            socket.on('message', function(msg) {
-                // Create a new list item
+            // --- Updated: Handle incoming messages ---
+            socket.on('message', function(data) {
                 var li = document.createElement('li');
-                li.appendChild(document.createTextNode(msg));
-                
-                // Add the message to the list
-                messagesList.appendChild(li);
 
-                // Scroll to bottom when new message arrives
+                // Check if data is an object (our chat message) or a string (a join/leave message)
+                if (typeof data === 'object') {
+                    li.textContent = `${data.name}: ${data.msg}`;
+                    // You could style your own messages differently
+                    if (data.name === username) {
+                        li.style.fontWeight = 'bold';
+                        li.style.background = '#dcf8c6'; // A light green
+                    }
+                } else {
+                    // This is a simple string message like "User has joined"
+                    li.textContent = data;
+                    li.style.fontStyle = 'italic';
+                    li.style.textAlign = 'center';
+                }
+                
+                messagesList.appendChild(li);
                 scrollToBottom();
             });
 
             // --- Send Message ---
-            var sendButton = document.getElementById('sendButton');
-            
-            sendButton.onclick = function() {
-                var messageInput = document.getElementById('messageInput');
+            function sendMessage() {
                 var messageText = messageInput.value;
-                
                 if (messageText.trim() !== '') {
-                    socket.send(messageText);
+                    socket.send(messageText); // Server will get this and add the name
                     messageInput.value = '';
                 }
-            };
+            }
 
-            // Allow pressing Enter to send
+            sendButton.onclick = sendMessage;
+
             messageInput.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
-                    sendButton.onclick(); // Trigger the send button click
+                    sendMessage();
                 }
             });
         });
     </script>
     
     <style>
+        /* (Your CSS styling) ... */
         body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f0f0; }
         #chat-container { width: 400px; height: 600px; border: 1px solid #ccc; background: #fff; display: flex; flex-direction: column; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        /* Make the message list scrollable */
         #messages { list-style-type: none; padding: 10px; margin: 0; overflow-y: scroll; flex-grow: 1; border-bottom: 1px solid #ccc; }
         #messages li { padding: 8px 12px; margin-bottom: 5px; background: #e0f7fa; border-radius: 10px; word-wrap: break-word; }
         #input-area { display: flex; padding: 10px; border-top: 1px solid #eee; }
@@ -75,7 +85,7 @@
     <div id="chat-container">
         <ul id="messages">
             {% for msg in history %}
-                <li>{{ msg.content }}</li>
+                <li>{{ msg.username }}: {{ msg.content }}</li>
             {% endfor %}
         </ul>
         
