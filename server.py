@@ -98,3 +98,15 @@ def handle_message(msg_content):
     send(data, broadcast=True)
 
 # Note: The init.py file doesn't need to change!
+
+# --- Run the App (for local testing) ---
+if __name__ == '__main__':
+    # Initialize the database first (creates chat.db)
+    init_db()
+    
+    print("Database initialized.")
+    print("Starting server on http://127.0.0.1:5000")
+    
+    # This command is for local testing
+    # It will use 'eventlet' because we set async_mode='eventlet' above
+    socketio.run(app, host='127.0.0.1', port=5000, debug=True)
