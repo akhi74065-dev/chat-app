@@ -5,7 +5,7 @@ from flask_socketio import SocketIO, send
 # --- App Setup ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-goes-here'
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode='eventlet')
 
 # --- Database Setup ---
 DATABASE = 'chat.db'
@@ -86,4 +86,5 @@ if __name__ == '__main__':
     
     # We've added host='0.0.0.0'
     print("Starting server on http://0.0.0.0:5000") 
+
     socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
