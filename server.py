@@ -1,11 +1,13 @@
 import sqlite3
-from flask import Flask, render_template, g
+# Import 'session' and 'request'
+from flask import Flask, render_template, g, session, request
 from flask_socketio import SocketIO, send
 
 # --- App Setup ---
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-goes-here'
-socketio = SocketIO(app, async_mode='eventlet')
+app.config['SECRET_KEY'] = 'your-secret-key-goes-here' # Make sure this is set!
+# Use 'eventlet' for production
+socketio = SocketIO(app, async_mode='eventlet') 
 
 # --- Database Setup ---
 DATABASE = 'chat.db'
@@ -15,19 +17,18 @@ def get_db():
     db = getattr(g, '_database', None)
     if db is None:
         db = g._database = sqlite3.connect(DATABASE)
-        # Return rows as dictionaries (easier to work with)
         db.row_factory = sqlite3.Row
     return db
 
 @app.teardown_appcontext
 def close_connection(exception):
-    """Close the database connection at the end of the request."""
+    """Close the database connection."""
     db = getattr(g, '_database', None)
     if db is not None:
         db.close()
 
 def init_db():
-    """Initialize the database and create the 'messages' table if it doesn't exist."""
+    """Initialize the database."""
     with app.app_context():
         db = get_db()
         with app.open_resource('schema.sql', mode='r') as f:
@@ -35,20 +36,21 @@ def init_db():
         db.commit()
     print("Database initialized.")
 
-def save_message(content):
-    """Save a new message to the database."""
+def save_message(username, content):
+    """Update: Save a new message with username."""
     with app.app_context():
         db = get_db()
-        db.execute('INSERT INTO messages (content) VALUES (?)', (content,))
+        # Update: Insert username and content
+        db.execute('INSERT INTO messages (username, content) VALUES (?, ?)', (username, content))
         db.commit()
 
 def get_all_messages():
-    """Get all messages from the database, oldest first."""
+    """Update: Get all messages with usernames."""
     with app.app_context():
         db = get_db()
-        cursor = db.execute('SELECT content, timestamp FROM messages ORDER BY timestamp ASC')
+        # Update: Select username and content
+        cursor = db.execute('SELECT username, content, timestamp FROM messages ORDER BY timestamp ASC')
         messages = cursor.fetchall()
-        # Convert row objects to simple dictionaries for the template
         return [dict(msg) for msg in messages]
 
 # --- Routes ---
@@ -59,32 +61,40 @@ def index():
     return render_template('index.html', history=messages)
 
 # --- SocketIO Event Handlers ---
-@socketio.on('connect')
-def handle_connect():
-    """Event handler for new connections."""
-    print('Client connected!')
+
+@socketio.on('join')
+def handle_join(username):
+    """New: Handle a user joining the chat."""
+    # 'request.sid' is the unique ID for the user's connection
+    print(f"User {username} joined with sid {request.sid}")
+    # Store the username in the user's session
+    session['username'] = username
+    # Announce to everyone that a user has joined
+    send(f"{username} has joined the chat.", broadcast=True)
 
 @socketio.on('message')
 def handle_message(msg_content):
-    """
-    Event handler for new messages.
-    1. Save the message to the database.
-    2. Broadcast the message to all clients.
-    """
-    print(f'Received message: {msg_content}')
+    """Update: Handle a new message from a known user."""
     
-    # 1. Save to DB
-    save_message(msg_content)
+    # Get the username from their session
+    username = session.get('username')
     
-    # 2. Broadcast to all connected clients
-    send(msg_content, broadcast=True)
+    # If the user isn't in a session (e.g., disconnected), do nothing
+    if not username:
+        return
 
-# --- Run the App ---
-if __name__ == '__main__':
-    # Initialize the database first
-    init_db()
+    print(f'Received message from {username}: {msg_content}')
     
-    # We've added host='0.0.0.0'
-    print("Starting server on http://0.0.0.0:5000") 
+    # 1. Save to DB (with username)
+    save_message(username, msg_content)
+    
+    # 2. Create a data packet to send
+    data = {
+        'name': username,
+        'msg': msg_content
+    }
+    
+    # 3. Broadcast the data packet to all connected clients
+    send(data, broadcast=True)
 
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+# Note: The init.py file doesn't need to change!
