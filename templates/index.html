@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Chat App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    
+    <script type="text/javascript">
+        document.addEventListener('DOMContentLoaded', (event) => {
+            var socket = io();
+
+            // Find the messages list
+            var messagesList = document.getElementById('messages');
+
+            // --- Scroll to bottom ---
+            function scrollToBottom() {
+                messagesList.scrollTop = messagesList.scrollHeight;
+            }
+            
+            // Scroll to bottom on initial load
+            scrollToBottom();
+
+            // --- Event Listeners ---
+            socket.on('connect', function() {
+                console.log('Connected to server!');
+            });
+
+            // 2. Handle incoming messages from the server
+            socket.on('message', function(msg) {
+                // Create a new list item
+                var li = document.createElement('li');
+                li.appendChild(document.createTextNode(msg));
+                
+                // Add the message to the list
+                messagesList.appendChild(li);
+
+                // Scroll to bottom when new message arrives
+                scrollToBottom();
+            });
+
+            // --- Send Message ---
+            var sendButton = document.getElementById('sendButton');
+            
+            sendButton.onclick = function() {
+                var messageInput = document.getElementById('messageInput');
+                var messageText = messageInput.value;
+                
+                if (messageText.trim() !== '') {
+                    socket.send(messageText);
+                    messageInput.value = '';
+                }
+            };
+
+            // Allow pressing Enter to send
+            messageInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendButton.onclick(); // Trigger the send button click
+                }
+            });
+        });
+    </script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f0f0; }
+        #chat-container { width: 400px; height: 600px; border: 1px solid #ccc; background: #fff; display: flex; flex-direction: column; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        /* Make the message list scrollable */
+        #messages { list-style-type: none; padding: 10px; margin: 0; overflow-y: scroll; flex-grow: 1; border-bottom: 1px solid #ccc; }
+        #messages li { padding: 8px 12px; margin-bottom: 5px; background: #e0f7fa; border-radius: 10px; word-wrap: break-word; }
+        #input-area { display: flex; padding: 10px; border-top: 1px solid #eee; }
+        #messageInput { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
+        #sendButton { padding: 8px 15px; margin-left: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        #sendButton:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <ul id="messages">
+            {% for msg in history %}
+                <li>{{ msg.content }}</li>
+            {% endfor %}
+        </ul>
+        
+        <div id="input-area">
+            <input id="messageInput" autocomplete="off" placeholder="Type a message..." />
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+</body>
+</html>
