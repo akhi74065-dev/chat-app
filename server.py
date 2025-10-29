@@ -141,6 +141,30 @@ def handle_private_message(data):
     # 4. Send the message back to the sender *only*
     emit('private_message', message_packet, room=request.sid)
 
+@socketio.on('request_call')
+def handle_request_call(data):
+    """New: Handle a call request."""
+    sender_username = session.get('username')
+    recipient_username = data['recipient']
+    
+    recipient_sid = users.get(recipient_username)
+    if recipient_sid:
+        print(f"{sender_username} is calling {recipient_username}")
+        # Emit to the recipient *only*
+        emit('incoming_call', {'sender': sender_username}, room=recipient_sid)
+
+@socketio.on('accept_call')
+def handle_accept_call(data):
+    """New: Handle a call acceptance."""
+    sender_username = session.get('username')
+    recipient_username = data['recipient']
+    
+    recipient_sid = users.get(recipient_username)
+    if recipient_sid:
+        print(f"{sender_username} accepted call from {recipient_username}")
+        # Tell the original caller the call was accepted
+        emit('call_accepted', {'sender': sender_username}, room=recipient_sid)
+
 # --- Run the App (for local testing) ---
 if __name__ == '__main__':
     init_db()
