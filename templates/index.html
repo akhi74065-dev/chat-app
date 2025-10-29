@@ -57,8 +57,22 @@
             padding: 15px;
             border-bottom: 1px solid #eee;
             font-weight: bold;
-            text-align: center;
             background: #f5f5f5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #callButton {
+            display: none; 
+            padding: 5px 8px; 
+            background: #28a745; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer;
+        }
+        #callButton:hover {
+            background: #218838;
         }
         #messages {
             list-style-type: none;
@@ -100,7 +114,11 @@
         </div>
         
         <div id="chat-container">
-            <div id="chat-header">Select a user to chat</div>
+            <div id="chat-header">
+                <span id="chat-with-text">Select a user to chat</span>
+                <button id="callButton">📞 Call</button>
+            </div>
+            
             <ul id="messages">
                 </ul>
             <div id="input-area">
@@ -120,20 +138,29 @@
             var messageInput = document.getElementById('messageInput');
             var sendButton = document.getElementById('sendButton');
             var chatHeader = document.getElementById('chat-header');
+            var chatWithText = document.getElementById('chat-with-text'); // Get the new <span>
+            var callButton = document.getElementById('callButton');
             
             // --- App State ---
             let myUsername = '';
             let currentChatPartner = null;
+            let chatHistories = {}; // This is our new cache
 
             // --- 1. Ask for username and Join ---
             while (!myUsername) {
                 myUsername = prompt("What is your name?");
+                if (myUsername === null) {
+                    // Handle user clicking "Cancel"
+                    myUsername = '';
+                }
             }
             socket.emit('join', myUsername);
 
             // --- 2. Listen for User List Updates ---
             socket.on('user_list', function(usernames) {
                 userList.innerHTML = ''; // Clear the list
+                let activeUserStillOnline = false;
+                
                 usernames.forEach(function(username) {
                     if (username === myUsername) return; // Don't list myself
                     
@@ -147,43 +174,99 @@
                     };
                     
                     userList.appendChild(li);
+                    
+                    if (username === currentChatPartner) {
+                        activeUserStillOnline = true;
+                    }
                 });
+
                 // Re-select active user if they are still online
-                if (currentChatPartner) {
+                if (activeUserStillOnline) {
                     highlightActiveUser(currentChatPartner);
+                } else if (currentChatPartner) {
+                    // The person you were chatting with disconnected
+                    chatWithText.textContent = `Select a user to chat`; 
+                    messagesList.innerHTML = `<li style="text-align: center; font-style: italic;">${currentChatPartner} has disconnected.</li>`;
+                    callButton.style.display = 'none';
+                    currentChatPartner = null;
                 }
             });
             
-            // --- 3. Handle Clicking a User ---
+            // --- 3. Handle Clicking a User (UPDATED with cache) ---
             async function handleUserClick(username) {
+                // 1. Save the current chat (if one is open)
+                if (currentChatPartner) {
+                    chatHistories[currentChatPartner] = messagesList.innerHTML;
+                }
+
+                // 2. Set the new chat partner
                 currentChatPartner = username;
-                chatHeader.textContent = `Chat with ${username}`;
-                messagesList.innerHTML = ''; // Clear chat window
+                chatWithText.textContent = `Chat with ${username}`; // Only change the text
+                callButton.style.display = 'inline-block'; // Show call button
                 
-                highlightActiveUser(username);
-                
-                // Fetch chat history from the server
-                try {
-                    const response = await fetch(`/get_history/${username}`);
-                    const history = await response.json();
-                    history.forEach(function(msg) {
-                        displayMessage(msg.sender_username, msg.content);
-                    });
-                } catch (err) {
-                    console.error('Error fetching history:', err);
+                // 3. Remove any "New Message" notification
+                const userLi = userList.querySelector(`li[data-username="${username}"]`);
+                if (userLi) {
+                    userLi.textContent = username; // Reset text
+                    userLi.style.fontWeight = 'normal';
+                    highlightActiveUser(username);
+                }
+
+                // 4. Check if we have this chat in our cache
+                if (chatHistories[username]) {
+                    // 4a. Yes: Load from cache
+                    messagesList.innerHTML = chatHistories[username];
+                } else {
+                    // 4b. No: Fetch from server
+                    messagesList.innerHTML = ''; // Clear chat window
+                    try {
+                        const response = await fetch(`/get_history/${username}`);
+                        const history = await response.json();
+                        history.forEach(function(msg) {
+                            displayMessage(msg.sender_username, msg.content);
+                        });
+                        // Save the fetched history to cache
+                        chatHistories[username] = messagesList.innerHTML;
+                    } catch (err) { 
+                        console.error('Error fetching history:', err);
+                    }
                 }
                 
                 scrollToBottom();
             }
 
-            // --- 4. Listen for New Private Messages ---
+            // --- 4. Listen for New Private Messages (UPDATED with notifications) ---
             socket.on('private_message', function(data) {
                 // 'data' is {sender: 'some_user', msg: 'hello'}
+                let chatPartner = (data.sender === myUsername) ? currentChatPartner : data.sender;
                 
-                // Only display if it's part of the active chat
+                // Check if it's for the currently active chat
                 if (data.sender === currentChatPartner || data.sender === myUsername) {
                     displayMessage(data.sender, data.msg);
                     scrollToBottom();
+                    // Save the new message to the cache
+                    if (currentChatPartner) {
+                        chatHistories[currentChatPartner] = messagesList.innerHTML;
+                    }
+                } else {
+                    // It's for an inactive chat. Show a notification.
+                    const userLi = userList.querySelector(`li[data-username="${data.sender}"]`);
+                    if (userLi) {
+                        userLi.textContent = `${data.sender} (New Message!)`;
+                        // *** THIS IS THE FIX ***
+                        // It is now 'bold' not '.bold'
+                        userLi.style.fontWeight = 'bold';
+                    }
+                    
+                    // Add to the cache for that user, even if inactive
+                    if (!chatHistories[data.sender]) {
+                        chatHistories[data.sender] = ''; // Initialize if it doesn't exist
+                    }
+                    let tempLi = document.createElement('li');
+                    // We must display the sender name for inactive chats
+                    tempLi.className = 'other';
+                    tempLi.textContent = `${data.sender}: ${data.msg}`;
+                    chatHistories[data.sender] += tempLi.outerHTML;
                 }
             });
 
@@ -203,13 +286,39 @@
                 messageInput.value = '';
             }
 
+            // --- 6. Call Feature (Simulation) ---
+            callButton.onclick = function() {
+                if (currentChatPartner) {
+                    console.log(`Requesting call with ${currentChatPartner}`);
+                    alert(`Calling ${currentChatPartner}...`);
+                    socket.emit('request_call', { 'recipient': currentChatPartner });
+                }
+            };
+
+            // What to do when YOU receive a call
+            socket.on('incoming_call', function(data) {
+                // data is {sender: 'some_user'}
+                console.log(`${data.sender} is calling you.`);
+                if (confirm(`${data.sender} is calling you. Do you accept?`)) {
+                    console.log('Accepting call...');
+                    // This is where you would start the WebRTC process
+                    socket.emit('accept_call', { 'recipient': data.sender });
+                }
+            });
+            
+            // What to do when the other person accepts your call
+            socket.on('call_accepted', function(data) {
+                alert(`${data.sender} accepted your call!`);
+                // This is where you would start the WebRTC process
+            });
+
             // --- Helper Functions ---
             function displayMessage(sender, message) {
                 var li = document.createElement('li');
-                li.textContent = message;
                 
                 if (sender === myUsername) {
                     li.className = 'me';
+                    li.textContent = message;
                 } else {
                     li.className = 'other';
                     li.textContent = `${sender}: ${message}`;
