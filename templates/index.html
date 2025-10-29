@@ -4,63 +4,235 @@
     <title>My Chat App</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f0f0; margin: 0; }
+        #app-container {
+            width: 800px;
+            height: 600px;
+            background: #fff;
+            display: flex;
+            flex-direction: row;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        /* --- User List (Left Side) --- */
+        #user-list-container {
+            width: 250px;
+            border-right: 1px solid #ccc;
+            display: flex;
+            flex-direction: column;
+            background: #f5f5f5;
+        }
+        #user-list-container h3 {
+            padding: 15px;
+            margin: 0;
+            border-bottom: 1px solid #eee;
+            text-align: center;
+        }
+        #user-list {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+            overflow-y: auto;
+        }
+        #user-list li {
+            padding: 15px 20px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+        }
+        #user-list li:hover {
+            background: #e0e0e0;
+        }
+        #user-list li.active {
+            background: #007bff;
+            color: white;
+            font-weight: bold;
+        }
+        /* --- Chat Area (Right Side) --- */
+        #chat-container {
+            flex-grow: 1; /* Take remaining space */
+            display: flex;
+            flex-direction: column;
+        }
+        #chat-header {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            font-weight: bold;
+            text-align: center;
+            background: #f5f5f5;
+        }
+        #messages {
+            list-style-type: none;
+            padding: 10px;
+            margin: 0;
+            overflow-y: scroll;
+            flex-grow: 1;
+        }
+        #messages li {
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            word-wrap: break-word;
+            max-width: 70%;
+        }
+        /* Style for messages from "other" person */
+        #messages li.other {
+            background: #e0f7fa;
+            align-self: flex-start;
+        }
+        /* Style for messages from "me" */
+        #messages li.me {
+            background: #dcf8c6;
+            align-self: flex-end;
+            margin-left: auto; /* Push to the right */
+        }
+        #input-area { display: flex; padding: 10px; border-top: 1px solid #eee; }
+        #messageInput { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
+        #sendButton { padding: 8px 15px; margin-left: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        
+        <div id="user-list-container">
+            <h3>Online Users</h3>
+            <ul id="user-list">
+                </ul>
+        </div>
+        
+        <div id="chat-container">
+            <div id="chat-header">Select a user to chat</div>
+            <ul id="messages">
+                </ul>
+            <div id="input-area">
+                <input id="messageInput" autocomplete="off" placeholder="Type a message..." />
+                <button id="sendButton">Send</button>
+            </div>
+        </div>
+    </div>
+
     <script type="text/javascript">
         document.addEventListener('DOMContentLoaded', (event) => {
             var socket = io();
 
+            // --- Page Elements ---
+            var userList = document.getElementById('user-list');
             var messagesList = document.getElementById('messages');
             var messageInput = document.getElementById('messageInput');
             var sendButton = document.getElementById('sendButton');
+            var chatHeader = document.getElementById('chat-header');
+            
+            // --- App State ---
+            let myUsername = '';
+            let currentChatPartner = null;
 
-            // --- New: Ask for username ---
-            let username = '';
-            while (username.trim() === '') {
-                username = prompt("What is your name?");
+            // --- 1. Ask for username and Join ---
+            while (!myUsername) {
+                myUsername = prompt("What is your name?");
             }
-            // Send the username to the server
-            socket.emit('join', username);
-            // --- End of new part ---
+            socket.emit('join', myUsername);
 
+            // --- 2. Listen for User List Updates ---
+            socket.on('user_list', function(usernames) {
+                userList.innerHTML = ''; // Clear the list
+                usernames.forEach(function(username) {
+                    if (username === myUsername) return; // Don't list myself
+                    
+                    var li = document.createElement('li');
+                    li.textContent = username;
+                    li.dataset.username = username; // Store username in data attribute
+                    
+                    // Add click event
+                    li.onclick = function() {
+                        handleUserClick(username);
+                    };
+                    
+                    userList.appendChild(li);
+                });
+                // Re-select active user if they are still online
+                if (currentChatPartner) {
+                    highlightActiveUser(currentChatPartner);
+                }
+            });
+            
+            // --- 3. Handle Clicking a User ---
+            async function handleUserClick(username) {
+                currentChatPartner = username;
+                chatHeader.textContent = `Chat with ${username}`;
+                messagesList.innerHTML = ''; // Clear chat window
+                
+                highlightActiveUser(username);
+                
+                // Fetch chat history from the server
+                try {
+                    const response = await fetch(`/get_history/${username}`);
+                    const history = await response.json();
+                    history.forEach(function(msg) {
+                        displayMessage(msg.sender_username, msg.content);
+                    });
+                } catch (err) {
+                    console.error('Error fetching history:', err);
+                }
+                
+                scrollToBottom();
+            }
+
+            // --- 4. Listen for New Private Messages ---
+            socket.on('private_message', function(data) {
+                // 'data' is {sender: 'some_user', msg: 'hello'}
+                
+                // Only display if it's part of the active chat
+                if (data.sender === currentChatPartner || data.sender === myUsername) {
+                    displayMessage(data.sender, data.msg);
+                    scrollToBottom();
+                }
+            });
+
+            // --- 5. Send a Message ---
+            function sendMessage() {
+                var messageText = messageInput.value;
+                if (messageText.trim() === '' || !currentChatPartner) {
+                    return; // Don't send empty messages or if no user is selected
+                }
+                
+                // Send a private message event to the server
+                socket.emit('private_message', {
+                    'recipient': currentChatPartner,
+                    'msg': messageText
+                });
+                
+                messageInput.value = '';
+            }
+
+            // --- Helper Functions ---
+            function displayMessage(sender, message) {
+                var li = document.createElement('li');
+                li.textContent = message;
+                
+                if (sender === myUsername) {
+                    li.className = 'me';
+                } else {
+                    li.className = 'other';
+                    li.textContent = `${sender}: ${message}`;
+                }
+                messagesList.appendChild(li);
+            }
+            
             function scrollToBottom() {
                 messagesList.scrollTop = messagesList.scrollHeight;
             }
             
-            scrollToBottom();
-
-            // --- Updated: Handle incoming messages ---
-            socket.on('message', function(data) {
-                var li = document.createElement('li');
-
-                // Check if data is an object (our chat message) or a string (a join/leave message)
-                if (typeof data === 'object') {
-                    li.textContent = `${data.name}: ${data.msg}`;
-                    // You could style your own messages differently
-                    if (data.name === username) {
-                        li.style.fontWeight = 'bold';
-                        li.style.background = '#dcf8c6'; // A light green
-                    }
-                } else {
-                    // This is a simple string message like "User has joined"
-                    li.textContent = data;
-                    li.style.fontStyle = 'italic';
-                    li.style.textAlign = 'center';
-                }
-                
-                messagesList.appendChild(li);
-                scrollToBottom();
-            });
-
-            // --- Send Message ---
-            function sendMessage() {
-                var messageText = messageInput.value;
-                if (messageText.trim() !== '') {
-                    socket.send(messageText); // Server will get this and add the name
-                    messageInput.value = '';
+            function highlightActiveUser(username) {
+                // Remove 'active' class from all users
+                userList.querySelectorAll('li').forEach(li => li.classList.remove('active'));
+                // Add 'active' class to the clicked user
+                const userLi = userList.querySelector(`li[data-username="${username}"]`);
+                if (userLi) {
+                    userLi.classList.add('active');
                 }
             }
 
+            // --- Event Listeners for Sending ---
             sendButton.onclick = sendMessage;
-
             messageInput.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     sendMessage();
@@ -68,31 +240,5 @@
             });
         });
     </script>
-    
-    <style>
-        /* (Your CSS styling) ... */
-        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f0f0; }
-        #chat-container { width: 400px; height: 600px; border: 1px solid #ccc; background: #fff; display: flex; flex-direction: column; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        #messages { list-style-type: none; padding: 10px; margin: 0; overflow-y: scroll; flex-grow: 1; border-bottom: 1px solid #ccc; }
-        #messages li { padding: 8px 12px; margin-bottom: 5px; background: #e0f7fa; border-radius: 10px; word-wrap: break-word; }
-        #input-area { display: flex; padding: 10px; border-top: 1px solid #eee; }
-        #messageInput { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
-        #sendButton { padding: 8px 15px; margin-left: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        #sendButton:hover { background: #0056b3; }
-    </style>
-</head>
-<body>
-    <div id="chat-container">
-        <ul id="messages">
-            {% for msg in history %}
-                <li>{{ msg.username }}: {{ msg.content }}</li>
-            {% endfor %}
-        </ul>
-        
-        <div id="input-area">
-            <input id="messageInput" autocomplete="off" placeholder="Type a message..." />
-            <button id="sendButton">Send</button>
-        </div>
-    </div>
 </body>
 </html>
